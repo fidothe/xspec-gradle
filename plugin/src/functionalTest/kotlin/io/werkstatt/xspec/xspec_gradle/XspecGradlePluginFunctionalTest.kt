@@ -39,7 +39,7 @@ class XspecGradlePluginFunctionalTest {
           
           xspec {
               xspecDir = layout.projectDirectory.dir("${specFixturesDir.resolve("xslt/apply-templates")}")
-              suiteFiles.from(layout.projectDirectory.file("${specFixturesDir.resolve("xslt/apply-templates/simple.xspec")}"))
+              srcDir = layout.projectDirectory.dir("${specFixturesDir.resolve("xslt/apply-templates")}")
           }
         """.trimIndent())
 

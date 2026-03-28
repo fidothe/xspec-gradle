@@ -32,7 +32,18 @@ class XspecGradlePlugin: Plugin<Project> {
         val version = this::class.java.getResource("xspec-version.txt").readText().trim()
         val xspecHome = extension.xspecHome
 
-        val suiteSpecs = suiteSpecPaths(extension.suiteFiles, extension.xspecDir)
+
+        val specSuiteFiles = extension.xspecDir.map {
+            it.asFileTree.matching {
+                include("**/*.xspec")
+            }
+        }
+
+        val allSourceFiles = extension.srcDir.map {
+            it.asFileTree.matching {
+                exclude("**/*.xspec")
+            }
+        }
 
         val zip = project.tasks.register<XspecImplCopyZipTask>("extract-xspec-zip") {
             xspecVersion = version
@@ -50,7 +61,7 @@ class XspecGradlePlugin: Plugin<Project> {
             xspecDir = extension.xspecDir
             xspecBuildDir = extension.xspecBuildDir
             this.xspecHome = impl.map { it.xspecHome.get() }
-            suiteSpecPaths = suiteSpecs
+            suiteFiles.from(specSuiteFiles)
         }
 
         val runner = project.tasks.register<XspecRunnerTask>("xspec") {
@@ -59,6 +70,7 @@ class XspecGradlePlugin: Plugin<Project> {
             xspecBuildDir = extension.xspecBuildDir
             this.xspecHome = impl.map { it.xspecHome.get() }
             compiledSuiteFiles.from(compiler)
+            sourceFiles.from(allSourceFiles)
         }
     }
 }

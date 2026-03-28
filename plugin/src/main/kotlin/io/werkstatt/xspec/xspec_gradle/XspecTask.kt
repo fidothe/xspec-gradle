@@ -11,16 +11,18 @@ import org.gradle.kotlin.dsl.assign
 import org.gradle.process.ExecOperations
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import javax.inject.Inject
 import kotlin.io.path.nameWithoutExtension
+import kotlin.io.path.relativeTo
 
 
 interface XspecExtension {
   val xspecDir: DirectoryProperty
+  val srcDir: DirectoryProperty
   val xspecBuildDir: DirectoryProperty
   val xspecHome: DirectoryProperty
-  val suiteFiles: ConfigurableFileCollection
 }
 
 abstract class XspecImplCopyZipTask : DefaultTask() {
@@ -81,18 +83,16 @@ abstract class XspecImplCopyTask @Inject constructor(private val archive: Archiv
 }
 
 abstract class XspecBaseTask : DefaultTask() {
-  fun suffixedFile(dir: Directory, specPath: String, suffix: String): File {
-    val specFullPath = dir.file(specPath).asFile.toPath()
-    val newName = "${specFullPath.nameWithoutExtension}-${suffix}"
-    return specFullPath.resolveSibling(newName).toFile()
+  fun relativizedSpecFilePath(input: Path): Path {
+    return input.relativeTo(xspecDir.asFile.get().toPath())
   }
 
-  fun compiledFile(dir: Directory, specPath: String): File {
-    return suffixedFile(dir, specPath, "compiled.xsl")
+  fun addSuffix(input: Path, suffix: String): Path {
+    return input.resolveSibling("${input.nameWithoutExtension}-${suffix}")
   }
 
-  fun compiledFileTo(compiledFile: File, suffix: String): File {
-    return compiledFile.parentFile.toPath().resolve("${compiledFile.nameWithoutExtension}-suffix").toFile()
+  fun relativeToXspecBuildDir(input: Path): Path {
+    return xspecBuildDir.get().asFile.toPath().resolve(relativizedSpecFilePath(input))
   }
 
   @get:InputFiles
@@ -103,9 +103,6 @@ abstract class XspecBaseTask : DefaultTask() {
 
   @get:Internal
   abstract val xspecBuildDir: DirectoryProperty
-
-  @get:Input
-  abstract val suiteSpecPaths: ListProperty<String>
 
   @get:InputDirectory
   abstract val xspecHome: DirectoryProperty
@@ -120,14 +117,18 @@ abstract class XspecBaseTask : DefaultTask() {
 }
 
 abstract class XspecCompilerTask @Inject constructor(private val ex: ExecOperations) : XspecBaseTask() {
+  fun compiledFile(spec: File): Path {
+    return addSuffix(relativeToXspecBuildDir(spec.toPath()), "compiled.xsl")
+  }
+
   @get:InputFiles
-  val suiteFiles: FileCollection = project.objects.fileCollection().from(xspecDir.map { dir ->
-    suiteSpecPaths.get().map { p -> dir.file(p) }
-  })
+  abstract val suiteFiles: ConfigurableFileCollection
 
   @get:OutputFiles
-  val compiledSuiteFiles: ConfigurableFileCollection = project.objects.fileCollection().from(xspecBuildDir.map { dir ->
-    suiteSpecPaths.get().map { p -> compiledFile(dir, p) }
+  val compiledSuiteFiles: FileCollection get() = project.objects.fileCollection().from(suiteFiles.elements.map { files ->
+    files.map { spec ->
+      compiledFile(spec.asFile)
+    }
   })
 
   private val compilerXsl = xspecHome.map { xspecHome -> xspecHome.file("src/compiler/compile-xslt-tests.xsl") }
@@ -135,40 +136,40 @@ abstract class XspecCompilerTask @Inject constructor(private val ex: ExecOperati
   @TaskAction
   fun compile() {
     val cp = classpath
-    suiteSpecPaths.get().forEach { suiteSpecPath ->
-      val input = xspecDir.get().file(suiteSpecPath)
-      val output = compiledFile(xspecBuildDir.get(), suiteSpecPath)
-      val coverage = output.toPath().parent.resolve("${output.nameWithoutExtension}-coverage.xml")
+    suiteFiles.forEach { input ->
+      val output = compiledFile(input)
+      val coverage = addSuffix(output, "coverage.xml")
 
       ex.javaexec {
-        jvmArgs(baseJavaOptions(input.asFile))
+        jvmArgs(baseJavaOptions(input))
         jvmArgs("-Dxspec.coverage.xml=\"${coverage}\"")
 
         classpath = cp
         mainClass = "net.sf.saxon.Transform"
-        args("-o:${output}", "-s:${input.asFile}", "-xsl:${compilerXsl.get().asFile}")
+        args("-o:${output}", "-s:${input}", "-xsl:${compilerXsl.get().asFile}")
       }
-
-
     }
   }
 }
 
 
 abstract class XspecRunnerTask @Inject constructor(private val ex: ExecOperations): XspecBaseTask() {
-  fun coverageFile(input: File): File {
-    return compiledFileTo(input, "coverage.xml")
+  fun coverageFile(input: File): Path {
+    return addSuffix(input.toPath(), "coverage.xml")
   }
 
-  fun resultFile(input: File): File {
-    return compiledFileTo(input, "result.xml")
+  fun resultFile(input: File): Path {
+    return addSuffix(input.toPath(), "result.xml")
   }
 
   @get:InputFiles
   abstract val compiledSuiteFiles: ConfigurableFileCollection
 
+  @get:InputFiles
+  abstract val sourceFiles: ConfigurableFileCollection
+
   @get:OutputFiles
-  val resultFiles: ConfigurableFileCollection get() = project.objects.fileCollection().from(compiledSuiteFiles.map { input ->
+  val resultFiles: FileCollection get() = project.objects.fileCollection().from(compiledSuiteFiles.map { input ->
     resultFile(input)
   })
 
